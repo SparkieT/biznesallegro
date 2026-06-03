@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menedżer Zamówień Florystycznych</title>
+    <!-- Tailwind CSS dla nowoczesnego wyglądu -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Klasyczne biblioteki Firebase (Compat) - działają bezbłędnie na file:// -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bloom: {
+                            50: '#fdf8f7',
+                            100: '#fbeee9',
+                            200: '#f5d5cc',
+                            300: '#ebb3a4',
+                            400: '#dc8b79',
+                            500: '#cc6855',
+                            600: '#b84e3c',
+                            700: '#993e2f',
+                            800: '#7f3629',
+                            950: '#451a13',
+                        },
+                        sage: {
+                            50: '#f4f7f5',
+                            100: '#e5ebe6',
+                            200: '#cbdace',
+                            300: '#a3beaa',
+                            400: '#759980',
+                            500: '#567c63',
+                            600: '#43634e',
+                            700: '#375040',
+                            800: '#2e4135',
+                            900: '#27362d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Styl dedykowany do wydruku / zapisu jako PDF */
+        @media print {
+            body {
+                background-color: white !important;
+                color: black !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-full-width {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            .order-card {
+                break-inside: avoid;
+                border: 1px solid #e2e8f0 !important;
+                box-shadow: none !important;
+            }
+            .tab-content-panel {
+                display: block !important;
+            }
+            .print-break {
+                page-break-before: always;
+            }
+        }
+    </style>
+</head>
+<body class="bg-sage-50 text-slate-800 min-h-screen font-sans flex flex-col">
+
+    <!-- Nagłówek -->
+    <header class="bg-white border-b border-bloom-100 shadow-sm sticky top-0 z-30 no-print">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-bloom-100 rounded-full text-bloom-600">
+                    <!-- Ikona Kwiata -->
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-11.314l.707.707m11.314 11.314l.707-.707M12 8a4 4 0 100 8 4 4 0 000-8z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-bloom-950 tracking-tight">Kalkulator Zamówień Florystycznych</h1>
+                    <p class="text-xs text-sage-600 font-medium flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="sync-status-dot"></span>
+                        <span id="sync-status-text">Inicjalizacja systemu...</span>
+                    </p>
+                </div>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Funkcje eksportu/importu danych -->
+                <button onclick="exportData()" title="Pobierz plik z zamówieniami" class="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-all">
+                    📥 Pobierz kopię (Eksport)
+                </button>
+                <div class="relative">
+                    <button onclick="document.getElementById('import-file').click()" title="Wgraj plik z zamówieniami" class="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-all">
+                        📤 Wgraj kopię (Import)
+                    </button>
+                    <input type="file" id="import-file" class="hidden" accept=".json" onchange="importData(event)">
+                </div>
+                
+                <button onclick="window.print()" class="flex items-center gap-2 px-4 py-2 bg-sage-600 hover:bg-sage-700 text-white font-medium rounded-lg shadow-sm transition-all text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                    </svg>
+                    Zapisz PDF / Drukuj
+                </button>
+                <button onclick="clearAllOrders()" class="px-3 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 hover:border-rose-300 font-semibold rounded-lg text-xs transition-all">
+                    Wyczyść wszystko
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Wydruk Nagłówka -->
+    <div class="hidden print:block text-center py-6 border-b border-gray-300 mb-6">
+        <h1 class="text-3xl font-bold text-slate-900">Zestawienie Produkcyjne Zamówień</h1>
+        <p class="text-gray-500 mt-1" id="print-date">Generowano: </p>
+    </div>
+
+    <!-- UI TOAST POWIADOMIENIA -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-10 opacity-0 transition-all duration-300 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm pointer-events-none">
+        <span id="toast-icon">✨</span>
+        <span id="toast-msg">Powiadomienie</span>
+    </div>
+
+    <!-- DEDYKOWANE OKNO POTWIERDZEŃ -->
+    <div id="custom-confirm-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 hidden no-print">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl border border-slate-100 transform scale-95 transition-all">
+            <div class="flex items-center gap-3 text-amber-500 mb-4">
+                <span class="text-2xl">⚠️</span>
+                <h3 class="text-lg font-bold text-slate-900" id="confirm-title">Potwierdzenie</h3>
+            </div>
+            <p class="text-sm text-slate-600 mb-6 leading-relaxed" id="confirm-message">Czy na pewno chcesz wykonać tę akcję?</p>
+            <div class="flex justify-end gap-3">
+                <button id="confirm-cancel-btn" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-semibold transition-all">Anuluj</button>
+                <button id="confirm-ok-btn" class="px-4 py-2 bg-bloom-600 hover:bg-bloom-700 text-white rounded-lg text-sm font-semibold transition-all">Potwierdzam</button>
+            </div>
+        </div>
+    </div>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-col lg:flex-row gap-8">
+        
+        <!-- LEWA KOLUMNA -->
+        <div class="w-full lg:w-1/3 space-y-6 no-print">
+            
+            <!-- STATYSTYKI ZAMÓWIEŃ -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                <h3 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2 border-b pb-2">
+                    <svg class="w-5 h-5 text-bloom-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h2a2 2 0 002-2zm12 0v-11a2 2 0 00-2-2h-2a2 2 0 00-2 2v11a2 2 0 002 2h2a2 2 0 002-2z"></path>
+                    </svg>
+                    Licznik kategorii (szt.)
+                </h3>
+                
+                <div class="space-y-1.5 mb-4 max-h-[400px] overflow-y-auto pr-1">
+                    <div class="flex justify-between items-center bg-rose-50 border border-rose-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-rose-800">🌹 Róża w opakowaniu</span>
+                        <span class="text-sm font-black text-rose-950" id="stat-roza-opakowanie">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-pink-50 border border-pink-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-pink-800">💝 Róża podziękowanie</span>
+                        <span class="text-sm font-black text-pink-950" id="stat-roza-podziekowanie">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-amber-50 border border-amber-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-amber-800">✏️ Box kredki</span>
+                        <span class="text-sm font-black text-amber-950" id="stat-box-kredki">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-blue-50 border border-blue-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-blue-800">📦 Box pudełko</span>
+                        <span class="text-sm font-black text-blue-950" id="stat-box-pudelko">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-orange-50 border border-orange-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-orange-800">🛍️ Box torebka</span>
+                        <span class="text-sm font-black text-orange-950" id="stat-box-torebka">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-purple-50 border border-purple-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-purple-800">⭕ Box okrągły</span>
+                        <span class="text-sm font-black text-purple-950" id="stat-box-okragly">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-indigo-50 border border-indigo-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-indigo-800">🔮 Box Kula</span>
+                        <span class="text-sm font-black text-indigo-950" id="stat-box-kula">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-emerald-50 border border-emerald-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-emerald-800">🧺 Koszyczek mini</span>
+                        <span class="text-sm font-black text-emerald-950" id="stat-koszyczek-mini">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-teal-50 border border-teal-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-teal-800">💐 Bukiet podziękowania</span>
+                        <span class="text-sm font-black text-teal-950" id="stat-bukiet-podziekowanie">0</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-slate-50 border border-slate-100 rounded-lg p-2 text-xs">
+                        <span class="font-bold text-slate-700">⚙️ Inne</span>
+                        <span class="text-sm font-black text-slate-900" id="stat-inne">0</span>
+                    </div>
+                </div>
+
+                <div class="border-t pt-3 space-y-1.5">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500">Razem wszystkich sztuk:</span>
+                        <span class="font-bold text-slate-800 text-sm" id="stat-total-items">0 szt.</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500">Pozycje na liście:</span>
+                        <span class="font-bold text-slate-800" id="stat-total-orders">0</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-2 border-t text-sm font-semibold">
+                        <span class="text-bloom-950">Wartość całkowita:</span>
+                        <span class="text-bloom-600 font-black" id="stat-total-cash">0.00 zł</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FORMULARZ DODAWANIA ZAMÓWIENIA -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                <h3 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2 border-b pb-2">
+                    <svg class="w-5 h-5 text-bloom-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Wprowadź nowe zamówienie
+                </h3>
+
+                <form id="orderForm" onsubmit="saveOrder(event)" class="space-y-4">
+                    <input type="hidden" id="edit-id">
+                    
+                    <!-- Nazwa klienta/projektu -->
+                    <div>
+                        <label for="client" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Nazwa produktu / Nazwa z Allegro *</label>
+                        <input type="text" id="client" required placeholder="np. Róża Mydlana w Rożku Podziękowanie"
+                               class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all">
+                    </div>
+
+                    <!-- Rodzaj oraz Ilość w jednym rzędzie -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label for="type" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Kategoria *</label>
+                            <select id="type" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all bg-white">
+                                <option value="roza-opakowanie">Róża w opakowaniu</option>
+                                <option value="roza-podziekowanie">Róża podziękowanie</option>
+                                <option value="box-kredki">Box kredki</option>
+                                <option value="box-pudelko">Box pudełko</option>
+                                <option value="box-torebka">Box torebka</option>
+                                <option value="box-okragly">Box okrągły</option>
+                                <option value="box-kula">Box Kula</option>
+                                <option value="koszyczek-mini">Koszyczek mini</option>
+                                <option value="bukiet-podziekowanie">Bukiet podziękowania</option>
+                                <option value="inne">Inne</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="quantity" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Ilość szt. *</label>
+                            <input type="number" id="quantity" required min="1" value="1"
+                                   class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all">
+                        </div>
+                    </div>
+
+                    <!-- Cena za sztukę oraz Data realizacji -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label for="price" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Cena za szt. (zł) *</label>
+                            <input type="number" id="price" required min="0" step="0.01" value="0.00"
+                                   class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all">
+                        </div>
+                        <div>
+                            <label for="date" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Data odbioru</label>
+                            <input type="date" id="date"
+                                   class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all">
+                        </div>
+                    </div>
+
+                    <!-- Opis / Skład kompozycji -->
+                    <div>
+                        <label for="details" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Skład / uwagi / nr oferty Allegro</label>
+                        <textarea id="details" rows="2" placeholder="np. gipsówka, wstążka beżowa, oferta nr 18578395873"
+                                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-bloom-300 focus:border-bloom-400 outline-none transition-all resize-none"></textarea>
+                    </div>
+
+                    <!-- Miejsce na zdjęcie -->
+                    <div>
+                        <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Wgraj zdjęcie kompozycji</span>
+                        <div class="border-2 border-dashed border-slate-200 hover:border-bloom-300 rounded-xl p-3 text-center transition-colors cursor-pointer relative" id="drop-area">
+                            <input type="file" id="photo" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewImage(event)">
+                            <div class="space-y-1">
+                                <svg class="mx-auto h-8 w-8 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                                <p class="text-xs text-slate-500">Kliknij lub przeciągnij zdjęcie</p>
+                            </div>
+                            <!-- Mini podgląd wewnątrz uploadera -->
+                            <div id="file-preview-container" class="hidden mt-2 flex justify-center">
+                                <img id="file-preview-img" class="h-16 w-16 object-cover rounded-md border" src="">
+                                <button type="button" onclick="removePreview(event)" class="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-0.5 hover:bg-rose-600 transition-colors">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Przyciski -->
+                    <div class="flex gap-2 pt-2">
+                        <button type="submit" id="submit-btn" class="flex-grow py-2.5 px-4 bg-bloom-500 hover:bg-bloom-600 text-white font-medium rounded-lg text-sm shadow-sm transition-all text-center">
+                            Dodaj zamówienie
+                        </button>
+                        <button type="button" id="cancel-edit-btn" onclick="resetForm()" class="hidden px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium rounded-lg text-sm transition-all">
+                            Anuluj
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- PRAWA KOLUMNA -->
+        <div class="flex-grow w-full lg:w-2/3 print-full-width space-y-6">
+            
+            <!-- PANEL SYSTEMU ZAKŁADEK -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
+                
+                <!-- Przełącznik zakładek -->
+                <div class="flex border-b border-slate-200 no-print mb-6">
+                    <button onclick="switchTab('summary')" id="tab-btn-summary" class="pb-3 px-5 font-bold text-sm border-b-2 border-bloom-500 text-bloom-600 outline-none transition-all flex items-center gap-2">
+                        📦 Suma do zrobienia (Asortyment)
+                    </button>
+                    <button onclick="switchTab('details')" id="tab-btn-details" class="pb-3 px-5 font-semibold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 outline-none transition-all flex items-center gap-2">
+                        📋 Lista szczegółowa (<span id="tab-count-badge">0</span>)
+                    </button>
+                </div>
+
+                <!-- ZAKŁADKA 1: Podsumowanie asortymentu -->
+                <div id="tab-summary-content" class="tab-content-panel block">
+                    <div class="flex items-center justify-between border-b pb-3 mb-4">
+                        <div>
+                            <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                                <span>📦</span> Podsumowanie produkcji
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Zsumowana produkcja dla takich samych produktów</p>
+                        </div>
+                        <span class="hidden print:inline px-2 py-1 bg-bloom-600 rounded-lg text-xs font-bold uppercase tracking-wider text-white">Podsumowanie produkcji</span>
+                    </div>
+
+                    <div id="summary-count-list" class="space-y-2 text-sm text-slate-800">
+                        <p class="text-xs text-slate-500 italic py-4 text-center">Dodaj produkty, aby zobaczyć zbiorcze sumowanie asortymentu.</p>
+                    </div>
+                </div>
+
+                <!-- ZAKŁADKA 2: Pełna Lista zamówień -->
+                <div id="tab-details-content" class="tab-content-panel hidden print:block print-break">
+                    <div class="flex items-center justify-between border-b pb-3 mb-4">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                                <svg class="w-5 h-5 text-sage-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+                                </svg>
+                                Wszystkie zlecenia indywidualne
+                            </h2>
+                            <p class="text-xs text-slate-400 mt-0.5">Podgląd pojedynczych zamówień ze zdjęciami</p>
+                        </div>
+                        
+                        <!-- Szybkie filtrowanie -->
+                        <div class="flex gap-2 no-print">
+                            <select id="filter-type" onchange="renderOrders()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white outline-none">
+                                <option value="all">Wszystkie kategorie</option>
+                                <option value="roza-opakowanie">Róża w opakowaniu</option>
+                                <option value="roza-podziekowanie">Róża podziękowanie</option>
+                                <option value="box-kredki">Box kredki</option>
+                                <option value="box-pudelko">Box pudełko</option>
+                                <option value="box-torebka">Box torebka</option>
+                                <option value="box-okragly">Box okrągły</option>
+                                <option value="box-kula">Box Kula</option>
+                                <option value="koszyczek-mini">Koszyczek mini</option>
+                                <option value="bukiet-podziekowanie">Bukiet podziękowania</option>
+                                <option value="inne">Inne</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Lista zamówień pusty komunikat -->
+                    <div id="empty-state" class="hidden text-center py-16 space-y-4 no-print">
+                        <div class="mx-auto w-16 h-16 bg-sage-50 rounded-full flex items-center justify-center text-sage-400">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0a2 2 0 01-2 2H6a2 2 0 01-2-2m16 0V9a2 2 0 00-2-2H6a2 2 0 00-2 2v2m0 4h18"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h4 class="text-base font-semibold text-slate-800">Brak zarejestrowanych zamówień</h4>
+                            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">Dodaj pierwsze zlecenie za pomocą formularza po lewej stronie, aby rozpocząć proces zliczania.</p>
+                        </div>
+                    </div>
+
+                    <!-- Dynamiczna Lista zamówień -->
+                    <div id="orders-list" class="space-y-4 flex-grow">
+                        <!-- Karty zamówień wstrzykiwane tutaj -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="bg-white border-t border-slate-100 py-6 text-center text-xs text-slate-400 mt-12 no-print">
+        <p>&copy; 2026 Menedżer Zamówień Florystycznych. Projekt dostosowany do szybkiego podglądu, zliczania oraz druku.</p>
+    </footer>
+
+    <!-- Logika aplikacji – klasyczny skrypt, działa świetnie w każdym środowisku lokalnym -->
+    <script>
+        // Tablica przechowująca wszystkie zamówienia
+        var orders = [];
+        var currentPhotoBase64 = "";
+        var activeTab = "summary";
+
+        // Konfiguracja Firebase
+        var db = null;
+        var auth = null;
+        var appId = "florist-manager-app";
+        var isCloud = false;
+
+        // Custom Toast system powiadomień
+        function showToast(message, icon) {
+            icon = icon || "✨";
+            var toast = document.getElementById("toast");
+            var msgSpan = document.getElementById("toast-msg");
+            var iconSpan = document.getElementById("toast-icon");
+            
+            if (!toast || !msgSpan || !iconSpan) return;
+            
+            msgSpan.textContent = message;
+            iconSpan.textContent = icon;
+            
+            toast.className = "fixed bottom-5 right-5 z-50 transform translate-y-0 opacity-100 transition-all duration-300 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm pointer-events-auto";
+            
+            setTimeout(function() {
+                toast.className = "fixed bottom-5 right-5 z-50 transform translate-y-10 opacity-0 transition-all duration-300 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm pointer-events-none";
+            }, 3000);
+        }
+
+        // Custom modal confirmation
+        function showConfirm(title, message, onConfirm) {
+            var modal = document.getElementById("custom-confirm-modal");
+            document.getElementById("confirm-title").textContent = title;
+            document.getElementById("confirm-message").textContent = message;
+            
+            modal.classList.remove("hidden");
+            
+            var btnCancel = document.getElementById("confirm-cancel-btn");
+            var btnOk = document.getElementById("confirm-ok-btn");
+            
+            var newBtnCancel = btnCancel.cloneNode(true);
+            var newBtnOk = btnOk.cloneNode(true);
+            btnCancel.parentNode.replaceChild(newBtnCancel, btnCancel);
+            btnOk.parentNode.replaceChild(newBtnOk, btnOk);
+            
+            newBtnCancel.addEventListener("click", function() {
+                modal.classList.add("hidden");
+            });
+            
+            newBtnOk.addEventListener("click", function() {
+                modal.classList.add("hidden");
+                onConfirm();
+            });
+        }
+
+        var typeConfig = {
+            'roza-opakowanie': { label: 'Róża w opakowaniu', bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
+            'roza-podziekowanie': { label: 'Róża podziękowanie', bg: 'bg-pink-100', text: 'text-pink-800', border: 'border-pink-200' },
+            'box-kredki': { label: 'Box kredki', bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-200' },
+            'box-pudelko': { label: 'Box pudełko', bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-200' },
+            'box-torebka': { label: 'Box torebka', bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-200' },
+            'box-okragly': { label: 'Box okrągły', bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-200' },
+            'box-kula': { label: 'Box Kula', bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-200' },
+            'koszyczek-mini': { label: 'Koszyczek mini', bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-200' },
+            'bukiet-podziekowanie': { label: 'Bukiet podziękowania', bg: 'bg-teal-100', text: 'text-teal-800', border: 'border-teal-200' },
+            'inne': { label: 'Inne', bg: 'bg-slate-100', text: 'text-slate-800', border: 'border-slate-200' }
+        };
+
+        // Główna funkcja startowa
+        async function startApp() {
+            var statusDot = document.getElementById("sync-status-dot");
+            var statusText = document.getElementById("sync-status-text");
+
+            // Sprawdzanie dostępności chmury Firebase
+            try {
+                if (typeof firebase !== 'undefined' && typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    var firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+                    
+                    // Inicjalizacja klasycznego Firebase Compat
+                    firebase.initializeApp(firebaseConfig);
+                    auth = firebase.auth();
+                    db = firebase.firestore();
+                    appId = typeof __app_id !== 'undefined' ? __app_id : 'florist-manager-app';
+                    isCloud = true;
+                }
+            } catch (e) {
+                console.error("Zablokowano inicjalizację chmury:", e);
+                isCloud = false;
+            }
+
+            if (isCloud && auth && db) {
+                statusText.textContent = "Łączenie z chmurą...";
+                statusDot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+
+                try {
+                    // Logowanie anonimowe
+                    await auth.signInAnonymously();
+
+                    // Ścieżka do kolekcji w chmurze
+                    var ordersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders');
+                    
+                    ordersCollection.onSnapshot(function(snapshot) {
+                        orders = [];
+                        snapshot.forEach(function(doc) {
+                            orders.push(Object.assign({ id: doc.id }, doc.data()));
+                        });
+                        
+                        statusText.textContent = "Zsynchronizowano z chmurą (Realtime)";
+                        statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+                        renderOrders();
+                    }, function(error) {
+                        console.error("Błąd Firestore:", error);
+                        statusText.textContent = "Błąd synchronizacji. Dane lokalne.";
+                        statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
+                        loadLocalFallback();
+                    });
+
+                } catch (err) {
+                    console.error("Uwierzytelnianie Firebase nie powiodło się:", err);
+                    statusText.textContent = "Tryb offline (Pamięć lokalna)";
+                    statusDot.className = "w-2 h-2 rounded-full bg-slate-400";
+                    loadLocalFallback();
+                }
+            } else {
+                statusText.textContent = "Uruchomiono lokalnie (Pamięć przeglądarki)";
+                statusDot.className = "w-2 h-2 rounded-full bg-slate-400";
+                loadLocalFallback();
+            }
+
+            renderOrders();
+            switchTab('summary');
+        }
+
+        // Cykl startowy
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            startApp();
+        } else {
+            window.addEventListener('DOMContentLoaded', startApp);
+        }
+
+        function loadLocalFallback() {
+            var savedOrders = localStorage.getItem('florist_orders');
+            if (savedOrders) {
+                orders = JSON.parse(savedOrders);
+            }
+            renderOrders();
+        }
+
+        // Zapisywanie / Edycja zamówienia
+        async function saveOrder(event) {
+            event.preventDefault();
+
+            var editId = document.getElementById('edit-id').value;
+            var client = document.getElementById('client').value.trim();
+            var type = document.getElementById('type').value;
+            var quantity = parseInt(document.getElementById('quantity').value, 10);
+            var price = parseFloat(document.getElementById('price').value) || 0;
+            var date = document.getElementById('date').value;
+            var details = document.getElementById('details').value.trim();
+
+            if (!client || !type || isNaN(quantity)) {
+                return;
+            }
+
+            var targetId = editId || 'ord_' + Date.now() + Math.random().toString(36).substr(2, 5);
+            var orderData = {
+                client: client,
+                type: type,
+                quantity: quantity,
+                price: price,
+                date: date,
+                details: details,
+                photo: currentPhotoBase64 || (editId ? (orders.find(o => o.id === editId)?.photo || null) : null)
+            };
+
+            if (isCloud && auth && auth.currentUser) {
+                try {
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(targetId).set(orderData);
+                    showToast(editId ? "Zaktualizowano w chmurze!" : "Dodano do chmury!", "☁️");
+                } catch (e) {
+                    console.error("Błąd zapisu Firestore:", e);
+                    showToast("Błąd chmury. Zapisuję lokalnie.", "⚠️");
+                    saveLocalFallback(targetId, orderData, editId);
+                }
+            } else {
+                saveLocalFallback(targetId, orderData, editId);
+                showToast(editId ? "Zaktualizowano lokalnie!" : "Dodano lokalnie!", "💾");
+            }
+
+            resetForm();
+            switchTab('details');
+        }
+
+        function saveLocalFallback(id, data, isEdit) {
+            if (isEdit) {
+                var idx = orders.findIndex(o => o.id === id);
+                if (idx !== -1) orders[idx] = Object.assign({ id: id }, data);
+            } else {
+                orders.push(Object.assign({ id: id }, data));
+            }
+            saveLocalToStorage();
+            renderOrders();
+        }
+
+        function saveLocalToStorage() {
+            localStorage.setItem('florist_orders', JSON.stringify(orders));
+        }
+
+        // Usuwanie wybranego zamówienia
+        async function deleteOrder(id) {
+            if (isCloud && auth && auth.currentUser) {
+                try {
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(id).delete();
+                    showToast("Usunięto z chmury!", "🗑️");
+                } catch (e) {
+                    console.error("Błąd usuwania Firestore:", e);
+                    showToast("Błąd usuwania.", "⚠️");
+                }
+            } else {
+                orders = orders.filter(o => o.id !== id);
+                saveLocalToStorage();
+                renderOrders();
+                showToast("Usunięto z pamięci lokalnej!", "🗑️");
+            }
+        }
+
+        // Czyszczenie całej bazy danych
+        async function clearAllOrders() {
+            showConfirm(
+                "Wyczyszczenie całej listy",
+                "Czy na pewno chcesz usunąć WSZYSTKIE zamówienia z listy? Tej operacji nie da się cofnąć.",
+                async function() {
+                    if (isCloud && auth && auth.currentUser) {
+                        try {
+                            for (var i = 0; i < orders.length; i++) {
+                                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(orders[i].id).delete();
+                            }
+                            showToast("Wyczyszczono chmurę!", "🧹");
+                        } catch (e) {
+                            console.error("Błąd czyszczenia Firestore:", e);
+                        }
+                    } else {
+                        orders = [];
+                        saveLocalToStorage();
+                        resetForm();
+                        renderOrders();
+                        switchTab('summary');
+                        showToast("Wyczyszczono pamięć lokalną!", "🧹");
+                    }
+                }
+            );
+        }
+
+        // Eksport danych do pliku
+        function exportData() {
+            if (orders.length === 0) {
+                showToast("Nie masz żadnych zamówień do pobrania.", "⚠️");
+                return;
+            }
+            var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(orders));
+            var downloadAnchor = document.createElement('a');
+            var dateStr = new Date().toISOString().slice(0, 10);
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "zamowienia_florystyczne_" + dateStr + ".json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            showToast("Pobrano plik z kopią zapasową!", "📥");
+        }
+
+        // Import danych z pliku
+        async function importData(event) {
+            var file = event.target.files[0];
+            if (!file) return;
+
+            var reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    var importedOrders = JSON.parse(e.target.result);
+                    if (Array.isArray(importedOrders)) {
+                        showConfirm(
+                            "Import zamówień",
+                            "Czy chcesz wgrać " + importedOrders.length + " zamówień? Bieżące zamówienia zostaną zastąpione tymi z pliku.",
+                            async function() {
+                                if (isCloud && auth && auth.currentUser) {
+                                    try {
+                                        // Czyszczenie starej bazy w chmurze
+                                        for (var i = 0; i < orders.length; i++) {
+                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(orders[i].id).delete();
+                                        }
+                                        // Zapis nowej bazy
+                                        for (var j = 0; j < importedOrders.length; j++) {
+                                            var order = importedOrders[j];
+                                            var newId = order.id || 'ord_' + Date.now() + Math.random().toString(36).substr(2, 5);
+                                            var cleanOrder = Object.assign({}, order);
+                                            delete cleanOrder.id;
+                                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(newId).set(cleanOrder);
+                                        }
+                                        showToast("Pomyślnie zaimportowano do chmury!", "☁️");
+                                    } catch (err) {
+                                        console.error("Błąd zapisu importu do chmury:", err);
+                                        showToast("Błąd chmury przy imporcie.", "❌");
+                                    }
+                                } else {
+                                    orders = importedOrders;
+                                    saveLocalToStorage();
+                                    renderOrders();
+                                    switchTab('summary');
+                                    showToast("Pomyślnie zaimportowano lokalnie!", "📥");
+                                }
+                            }
+                        );
+                    } else {
+                        showToast("Nieprawidłowy plik kopii zapasowej.", "❌");
+                    }
+                } catch (err) {
+                    showToast("Błąd odczytu pliku kopii.", "❌");
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = "";
+        }
+
+        // Przełączanie między zakładkami (TABS)
+        function switchTab(tabName) {
+            activeTab = tabName;
+            
+            var btnSummary = document.getElementById('tab-btn-summary');
+            var btnDetails = document.getElementById('tab-btn-details');
+            var contentSummary = document.getElementById('tab-summary-content');
+            var contentDetails = document.getElementById('tab-details-content');
+
+            if (tabName === 'summary') {
+                btnSummary.className = "pb-3 px-5 font-bold text-sm border-b-2 border-bloom-500 text-bloom-600 outline-none transition-all flex items-center gap-2";
+                btnDetails.className = "pb-3 px-5 font-semibold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 outline-none transition-all flex items-center gap-2";
+                contentSummary.classList.remove('hidden');
+                contentDetails.classList.add('hidden');
+            } else {
+                btnSummary.className = "pb-3 px-5 font-semibold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 outline-none transition-all flex items-center gap-2";
+                btnDetails.className = "pb-3 px-5 font-bold text-sm border-b-2 border-bloom-500 text-bloom-600 outline-none transition-all flex items-center gap-2";
+                contentSummary.classList.add('hidden');
+                contentDetails.classList.remove('hidden');
+            }
+        }
+
+        // Konwersja zdjęcia do Base64
+        function previewImage(event) {
+            var file = event.target.files[0];
+            if (!file) return;
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                currentPhotoBase64 = e.target.result;
+                var container = document.getElementById('file-preview-container');
+                var img = document.getElementById('file-preview-img');
+                img.src = currentPhotoBase64;
+                container.classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Usunięcie podglądu z formularza
+        function removePreview(event) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+            document.getElementById('photo').value = "";
+            currentPhotoBase64 = "";
+            document.getElementById('file-preview-container').classList.add('hidden');
+        }
+
+        // Resetowanie formularza
+        function resetForm() {
+            document.getElementById('orderForm').reset();
+            document.getElementById('edit-id').value = "";
+            document.getElementById('submit-btn').textContent = "Dodaj zamówienie";
+            document.getElementById('cancel-edit-btn').classList.add('hidden');
+            removePreview();
+        }
+
+        // Przygotowanie do edycji
+        function editOrder(id) {
+            var order = orders.find(o => o.id === id);
+            if (!order) return;
+
+            document.getElementById('edit-id').value = order.id;
+            document.getElementById('client').value = order.client;
+            document.getElementById('type').value = order.type;
+            document.getElementById('quantity').value = order.quantity;
+            document.getElementById('price').value = order.price;
+            document.getElementById('date').value = order.date;
+            document.getElementById('details').value = order.details;
+
+            if (order.photo) {
+                currentPhotoBase64 = order.photo;
+                var container = document.getElementById('file-preview-container');
+                var img = document.getElementById('file-preview-img');
+                img.src = order.photo;
+                container.classList.remove('hidden');
+            } else {
+                removePreview();
+            }
+
+            document.getElementById('submit-btn').textContent = "Zapisz zmiany";
+            document.getElementById('cancel-edit-btn').classList.remove('hidden');
+            
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Liczenie statystyk i renderowanie listy zamówień oraz zbiorczego asortymentu
+        function renderOrders() {
+            var listContainer = document.getElementById('orders-list');
+            var emptyState = document.getElementById('empty-state');
+            var filterType = document.getElementById('filter-type').value;
+            var summaryContainer = document.getElementById('summary-count-list');
+            var tabBadge = document.getElementById('tab-count-badge');
+
+            // Zerowanie liczników kategorii
+            var countRozaOpakowanie = 0;
+            var countRozaPodziekowanie = 0;
+            var countBoxKredki = 0;
+            var countBoxPudelko = 0;
+            var countBoxTorebka = 0;
+            var countBoxOkragly = 0;
+            var countBoxKula = 0;
+            var countKoszyczekMini = 0;
+            var countBukietPodziekowanie = 0;
+            var countInne = 0;
+            
+            var totalCash = 0;
+            var totalItems = 0;
+
+            var groupedProducts = {};
+
+            orders.forEach(function(o) {
+                var totalPositionItems = parseInt(o.quantity, 10) || 0;
+                var totalPositionCash = totalPositionItems * (parseFloat(o.price) || 0);
+                
+                totalItems += totalPositionItems;
+                totalCash += totalPositionCash;
+
+                if (o.type === 'roza-opakowanie') countRozaOpakowanie += totalPositionItems;
+                else if (o.type === 'roza-podziekowanie') countRozaPodziekowanie += totalPositionItems;
+                else if (o.type === 'box-kredki') countBoxKredki += totalPositionItems;
+                else if (o.type === 'box-pudelko') countBoxPudelko += totalPositionItems;
+                else if (o.type === 'box-torebka') countBoxTorebka += totalPositionItems;
+                else if (o.type === 'box-okragly') countBoxOkragly += totalPositionItems;
+                else if (o.type === 'box-kula') countBoxKula += totalPositionItems;
+                else if (o.type === 'koszyczek-mini') countKoszyczekMini += totalPositionItems;
+                else if (o.type === 'bukiet-podziekowanie') countBukietPodziekowanie += totalPositionItems;
+                else if (o.type === 'inne') countInne += totalPositionItems;
+
+                var standardizedName = o.client ? o.client.trim() : "";
+                if (standardizedName) {
+                    if (groupedProducts[standardizedName]) {
+                        groupedProducts[standardizedName].quantity += totalPositionItems;
+                    } else {
+                        groupedProducts[standardizedName] = {
+                            name: standardizedName,
+                            quantity: totalPositionItems,
+                            category: o.type
+                        };
+                    }
+                }
+            });
+
+            document.getElementById('stat-roza-opakowanie').textContent = countRozaOpakowanie;
+            document.getElementById('stat-roza-podziekowanie').textContent = countRozaPodziekowanie;
+            document.getElementById('stat-box-kredki').textContent = countBoxKredki;
+            document.getElementById('stat-box-pudelko').textContent = countBoxPudelko;
+            document.getElementById('stat-box-torebka').textContent = countBoxTorebka;
+            document.getElementById('stat-box-okragly').textContent = countBoxOkragly;
+            document.getElementById('stat-box-kula').textContent = countBoxKula;
+            document.getElementById('stat-koszyczek-mini').textContent = countKoszyczekMini;
+            document.getElementById('stat-bukiet-podziekowanie').textContent = countBukietPodziekowanie;
+            document.getElementById('stat-inne').textContent = countInne;
+
+            document.getElementById('stat-total-orders').textContent = orders.length;
+            if (tabBadge) tabBadge.textContent = orders.length;
+            document.getElementById('stat-total-items').textContent = totalItems + " szt.";
+            document.getElementById('stat-total-cash').textContent = totalCash.toFixed(2) + " zł";
+
+            var groupedList = Object.values(groupedProducts);
+            if (groupedList.length === 0) {
+                summaryContainer.innerHTML = '<p class="text-xs text-slate-500 italic py-4 text-center">Dodaj produkty, aby zobaczyć zbiorcze sumowanie asortymentu.</p>';
+            } else {
+                groupedList.sort(function(a, b) { return b.quantity - a.quantity; });
+                
+                var summaryHtml = '<div class="divide-y divide-slate-100 max-h-[600px] overflow-y-auto pr-2">';
+                groupedList.forEach(function(item, index) {
+                    var catInfo = typeConfig[item.category] || typeConfig['inne'];
+                    summaryHtml += `
+                        <div class="py-3 flex items-center justify-between gap-4">
+                            <div class="flex items-start gap-3">
+                                <span class="text-xs font-bold text-slate-400 mt-0.5">${index + 1}.</span>
+                                <div class="flex flex-col">
+                                    <span class="text-slate-900 font-bold text-xs leading-snug">${item.name}</span>
+                                    <span class="text-[10px] text-slate-500 font-semibold mt-0.5">${catInfo.label}</span>
+                                </div>
+                            </div>
+                            <div class="flex-shrink-0 flex items-center gap-1.5">
+                                <span class="text-[10px] text-slate-400">suma:</span>
+                                <span class="px-3 py-1 bg-bloom-100 text-bloom-800 border border-bloom-200 rounded-lg font-black text-sm">${item.quantity} szt.</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                summaryHtml += '</div>';
+                summaryContainer.innerHTML = summaryHtml;
+            }
+
+            var filteredOrders = filterType === 'all' ? orders : orders.filter(function(o) { return o.type === filterType; });
+
+            if (filteredOrders.length === 0) {
+                listContainer.innerHTML = "";
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            var html = "";
+            filteredOrders.forEach(function(order) {
+                var config = typeConfig[order.type] || typeConfig['inne'];
+                var cost = (parseInt(order.quantity, 10) || 0) * (parseFloat(order.price) || 0);
+                
+                var formattedDate = "brak";
+                if (order.date) {
+                    var dateObj = new Date(order.date);
+                    formattedDate = dateObj.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' });
+                }
+
+                var imageHtml = "";
+                if (order.photo) {
+                    imageHtml = `<img src="${order.photo}" class="w-20 h-20 object-cover rounded-xl border border-slate-100 shadow-sm flex-shrink-0" alt="Kompozycja">`;
+                } else {
+                    imageHtml = `
+                        <div class="w-20 h-20 bg-slate-50 border border-dashed border-slate-200 rounded-xl flex-shrink-0 flex flex-col items-center justify-center text-slate-400 p-2 text-center no-print">
+                            <svg class="w-6 h-6 mb-1 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                            <span style="font-size: 8px;" class="uppercase font-semibold tracking-wider">Brak foto</span>
+                        </div>
+                        <div class="hidden print:block w-20 h-20 border border-gray-300 rounded-xl flex-shrink-0 flex items-center justify-center text-center text-[10px] text-gray-400">
+                            [Zdjęcie]
+                        </div>
+                    `;
+                }
+
+                html += `
+                <div class="order-card p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between transition-all hover:shadow-md">
+                    <div class="flex gap-4 items-center w-full sm:w-auto">
+                        <!-- Sekcja zdjęcia -->
+                        ${imageHtml}
+                        
+                        <!-- Szczegóły zamówienia -->
+                        <div class="space-y-1 flex-grow">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="px-2 py-0.5 text-[10px] font-semibold rounded-full ${config.bg} ${config.text} border ${config.border}">
+                                    ${config.label}
+                                </span>
+                                <span class="text-xs text-slate-400">Odbiór: <strong class="text-slate-600">${formattedDate}</strong></span>
+                            </div>
+                            
+                            <h4 class="font-bold text-slate-900 text-sm leading-tight">${order.client}</h4>
+                            
+                            ${order.details ? `<p class="text-xs text-slate-500 italic max-w-md">${order.details}</p>` : ''}
+                            
+                            <div class="text-xs text-slate-500 flex gap-4">
+                                <span>Ilość: <strong class="text-slate-700">${order.quantity} szt.</strong></span>
+                                <span>Cena jedn.: <strong class="text-slate-700">${(parseFloat(order.price) || 0).toFixed(2)} zł</strong></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Prawa strona karty: Cena i Akcje -->
+                    <div class="flex sm:flex-col justify-between items-center sm:items-end w-full sm:w-auto border-t sm:border-t-0 pt-3 sm:pt-0 gap-3">
+                        <div class="text-right">
+                            <span class="block text-[10px] text-slate-400 uppercase font-semibold tracking-wider leading-none">Suma</span>
+                            <span class="text-lg font-black text-bloom-950">${cost.toFixed(2)} zł</span>
+                        </div>
+                        
+                        <!-- Panel sterowania -->
+                        <div class="flex gap-1.5 no-print">
+                            <button onclick="editOrder('${order.id}')" title="Edytuj" class="p-1.5 text-sage-600 hover:bg-sage-50 rounded-lg border border-sage-100 hover:border-sage-200 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                </svg>
+                            </button>
+                            <button onclick="deleteOrder('${order.id}')" title="Usuń" class="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg border border-rose-100 hover:border-rose-200 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                `;
+            });
+
+            listContainer.innerHTML = html;
+        }
+
+        // Globalne wiązanie funkcji do ES modułu
+        window.switchTab = switchTab;
+        window.saveOrder = saveOrder;
+        window.deleteOrder = deleteOrder;
+        window.editOrder = editOrder;
+        window.clearAllOrders = clearAllOrders;
+        window.exportData = exportData;
+        window.importData = importData;
+        window.previewImage = previewImage;
+        window.removePreview = removePreview;
+        window.renderOrders = renderOrders;
+
+    </script>
+</body>
+</html>
